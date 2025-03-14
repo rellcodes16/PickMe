@@ -68,42 +68,6 @@ exports.getUserOrganizations = async (req, res) => {
     }
 };
 
-exports.inviteUser = async (req, res) => {
-    try {
-        const { email, role, organizationId } = req.body;
-
-        const organization = await Organization.findById(organizationId);
-        if (!organization) {
-            return res.status(404).json({ message: 'Organization not found' });
-        }
-
-        if (!organization.adminIds.includes(req.user.id)) {
-            return res.status(403).json({ message: 'Only admins can invite users' });
-        }
-
-        let user = await User.findOne({ email });
-        if (!user) {
-            return res.status(404).json({ message: 'User not found' });
-        }
-
-        if (!user.organizationIds) {
-            user.organizationIds = [];
-        }
-
-        if (!user.organizationIds.includes(organization._id.toString())) {
-            user.organizationIds.push(organization._id);
-        }
-
-        user.role = role || 'voter';
-        await user.save();
-
-        sendResponse(res, 200, { message: 'User invited successfully', user });
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: 'Error inviting user' });
-    }
-};
-
 exports.assignAdmin = async (req, res) => {
     try {
         const { userId, organizationId } = req.body;

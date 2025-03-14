@@ -46,7 +46,6 @@ exports.signup = catchAsync(async (req, res, next) => {
     let organizations = [];
     let role = 'voter';
 
-    // 1️⃣ Check if user already exists
     const existingUser = await User.findOne({ email });
 
     if (existingUser && !inviteToken) {
@@ -65,10 +64,14 @@ exports.signup = catchAsync(async (req, res, next) => {
             role = decoded.role || 'voter';
             organizations.push(organization._id);
 
-            // ✅ If user exists, just add them to the organization
             if (existingUser) {
                 if (!existingUser.organizationIds.includes(organization._id.toString())) {
                     existingUser.organizationIds.push(organization._id);
+                    
+                    existingUser.pendingInvites = existingUser.pendingInvites.filter(
+                        invite => invite.organizationId.toString() !== organization._id.toString()
+                    );
+
                     await existingUser.save();
                 }
                 return createSendToken(existingUser, 200, res);
@@ -76,7 +79,9 @@ exports.signup = catchAsync(async (req, res, next) => {
         } catch (err) {
             return next(new AppError('Invalid or expired invitation token', 400));
         }
-    } else if (organizationName) {
+    } 
+    
+    else if (organizationName) {
         let organization = await Organization.findOne({ name: organizationName });
 
         if (!organization) {
@@ -87,7 +92,6 @@ exports.signup = catchAsync(async (req, res, next) => {
         organizations.push(organization._id);
     }
 
-    // 2️⃣ If user doesn’t exist, create a new user
     const newUser = await User.create({
         name,
         email,
@@ -97,13 +101,19 @@ exports.signup = catchAsync(async (req, res, next) => {
         role,
     });
 
-    // 3️⃣ Make new user admin if they created the organization
     for (let orgId of organizations) {
         const org = await Organization.findById(orgId);
         if (org && role === 'admin') {
             org.adminIds.push(newUser._id);
             await org.save();
         }
+    }
+
+    if (existingUser) {
+        existingUser.pendingInvites = existingUser.pendingInvites.filter(
+            invite => !organizations.includes(invite.organizationId.toString())
+        );
+        await existingUser.save();
     }
 
     createSendToken(newUser, 201, res);

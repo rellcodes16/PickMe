@@ -42,9 +42,20 @@ const UserSchema = new mongoose.Schema({
         type: mongoose.Schema.ObjectId, 
         ref: 'Organization',
         default: []
-    }]
-
-});
+    }],
+    pendingInvites: [{
+        organizationId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'Organization'
+        },
+        role: {
+            type: String,
+            enum: ['admin', 'voter']
+        },
+        token: String,
+    }],
+    passwordChangedAt: Date
+}, { timestamps: true });
 
 UserSchema.pre('save', async function (next) {
     if (!this.isModified('password')) return next(); 

@@ -12,6 +12,7 @@ const favicon = require('serve-favicon')
 
 const authRouter = require('./routes/authRoutes')
 const orgRouter = require('./routes/orgRoutes')
+const invitationRouter = require('./routes/invitationRoutes')
 
 const app = express()
 
@@ -64,5 +65,6 @@ app.get('/', (req, res) => {
 
 app.use('/api/v1/auth', authRouter)
 app.use('/api/v1/org', orgRouter)
+app.use('/api/v1/invitation', invitationRouter)
 
 module.exports = app;

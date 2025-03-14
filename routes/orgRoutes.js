@@ -8,7 +8,6 @@ router.use(protect)
 
 router.post('/create', orgController.createOrganization);
 router.get('/my-organizations', orgController.getUserOrganizations);
-router.post('/invite', orgController.inviteUser);
 router.patch('/assign-admin', orgController.assignAdmin)
 router.delete('/remove-user', orgController.removeUser)
 
