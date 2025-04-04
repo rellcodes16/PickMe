@@ -36,16 +36,14 @@ const UserSchema = new mongoose.Schema({
     },
     passwordResetToken : String,
     passwordResetExpires: Date,
-    role: { 
-        type: String, 
-        enum: ['admin', 'voter'], 
-        default: 'voter' 
-    },
     organizationIds: [{ 
         type: mongoose.Schema.ObjectId, 
         ref: 'Organization',
         default: []
     }],
+    inviteToken: {
+        type: String
+    },
     pendingInvites: [{
         organizationId: {
             type: mongoose.Schema.Types.ObjectId,

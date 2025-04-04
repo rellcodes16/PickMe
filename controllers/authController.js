@@ -7,6 +7,7 @@ const crypto = require('crypto');
 const { promisify } = require('util');
 const sendEmail = require('../utils/sendEmail');
 const AppError = require('../utils/apiError')
+const VotingSession = require('../models/VotingSess')
 
 const signToken = (id) => {
     return jwt.sign({ id }, process.env.JWT_SECRET, {
@@ -42,60 +43,56 @@ const createSendToken = async (user, statusCode, res) => {
 
 exports.signup = catchAsync(async (req, res, next) => {
     const { name, email, password, passwordConfirm, organizationName, inviteToken } = req.body;
-
     let profilePicture = req.file ? req.file.path : undefined;
 
     let organizations = [];
     let role = 'voter';
+    let votingSessionId = null;
 
-    const existingUser = await User.findOne({ email });
-
-    if (existingUser && !inviteToken) {
-        return next(new AppError('User with this email already exists', 400));
-    }
-
+    let emailFromToken = null;
     if (inviteToken) {
         try {
             const decoded = jwt.verify(inviteToken, process.env.JWT_SECRET);
+
+            emailFromToken = decoded.email; 
+
             const organization = await Organization.findById(decoded.organizationId);
 
             if (!organization) {
                 return next(new AppError('Invalid or expired invitation token', 400));
             }
 
-            role = decoded.role || 'voter';
+            const emailDomain = emailFromToken.split('@')[1];
+            if (!organization.validEmailDomains.includes(emailDomain)) {
+                return next(new AppError('Your email domain is not allowed for this organization', 400));
+            }
+
+            role = decoded.role || 'voter'; 
+            votingSessionId = decoded.votingSessionId || null;
             organizations.push(organization._id);
 
+            const existingUser = await User.findOne({ email: emailFromToken });
             if (existingUser) {
-                if (!existingUser.organizationIds.includes(organization._id.toString())) {
-                    existingUser.organizationIds.push(organization._id);
-                    existingUser.pendingInvites = existingUser.pendingInvites.filter(
-                        invite => invite.organizationId.toString() !== organization._id.toString()
-                    );
-
-                    await existingUser.save();
-                }
                 return createSendToken(existingUser, 200, res);
             }
         } catch (err) {
             return next(new AppError('Invalid or expired invitation token', 400));
         }
-    } 
-    
-    else if (organizationName) {
-        let organization = await Organization.findOne({ name: organizationName });
+    }
 
-        if (!organization) {
-            organization = await Organization.create({ name: organizationName });
-            role = 'admin';
-        }
+    if (!email && !emailFromToken) return next(new AppError('Email is required', 400));
 
-        organizations.push(organization._id);
+    const finalEmail = emailFromToken || email;
+
+    const existingUser = await User.findOne({ email: finalEmail });
+
+    if (existingUser && !inviteToken) {
+        return next(new AppError('User with this email already exists', 400));
     }
 
     const newUser = await User.create({
         name,
-        email,
+        email: finalEmail, 
         password,
         passwordConfirm,
         profilePicture, 
@@ -105,21 +102,24 @@ exports.signup = catchAsync(async (req, res, next) => {
 
     for (let orgId of organizations) {
         const org = await Organization.findById(orgId);
-        if (org && role === 'admin') {
-            org.adminIds.push(newUser._id);
+        if (org) {
+            org.roles.push({ userId: newUser._id, role });
             await org.save();
         }
     }
 
-    if (existingUser) {
-        existingUser.pendingInvites = existingUser.pendingInvites.filter(
-            invite => !organizations.includes(invite.organizationId.toString())
-        );
-        await existingUser.save();
+    if (role === 'voter' && votingSessionId) {
+        const votingSession = await VotingSession.findById(votingSessionId);
+        if (votingSession) {
+            votingSession.voters.push(newUser._id);
+            await votingSession.save();
+        }
     }
 
     createSendToken(newUser, 201, res);
 });
+
+
 
 exports.login = catchAsync(async (req, res, next) => {
     const { email, password } = req.body;
@@ -139,12 +139,27 @@ exports.login = catchAsync(async (req, res, next) => {
 
 exports.updateUser = catchAsync(async (req, res, next) => {
     const { name, email } = req.body;
-    let profilePicture = req.file ? req.file.path : undefined; 
+    let profilePicture = req.file ? req.file.path : undefined;
 
     const updatedFields = {};
     if (name) updatedFields.name = name;
-    if (email) updatedFields.email = email;
     if (profilePicture) updatedFields.profilePicture = profilePicture;
+
+    if (email) {
+        const emailDomain = email.split('@')[1];
+
+        const organization = await Organization.findOne({ _id: req.user.organizationId });
+
+        if (!organization) {
+            return next(new AppError('User is not associated with any organization', 400));
+        }
+
+        if (!organization.validEmailDomains.includes(emailDomain)) {
+            return next(new AppError('Your new email domain is not allowed for this organization', 400));
+        }
+
+        updatedFields.email = email;
+    }
 
     const updatedUser = await User.findByIdAndUpdate(req.user.id, updatedFields, {
         new: true,
@@ -159,30 +174,51 @@ exports.updateUser = catchAsync(async (req, res, next) => {
     });
 });
 
-
 exports.protect = catchAsync(async (req, res, next) => {
     let token;
 
+    console.log('Checking for token...');
+
     if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
         token = req.headers.authorization.split(' ')[1];
+        console.log('Token found in headers:', token);
     } else if (req.cookies.jwt) {
         token = req.cookies.jwt;
+        console.log('Token found in cookies:', token);
     }
 
     if (!token) {
+        console.log('No token provided');
         return res.status(401).json({ message: 'You are not logged in' });
     }
 
-    const decoded = await promisify(jwt.verify)(token, process.env.JWT_SECRET);
-    const currentUser = await User.findById(decoded.id).populate('organizationIds');
+    let decoded;
+    try {
+        decoded = await promisify(jwt.verify)(token, process.env.JWT_SECRET);
+        console.log('Decoded token:', decoded);
+    } catch (err) {
+        console.log('Invalid token:', err.message);
+        return res.status(401).json({ message: 'Invalid or expired token' });
+    }
+
+    const currentUser = await User.findById(decoded.id).populate({
+        path: 'organizationIds',
+        populate: {
+            path: 'roles.userId',
+            select: 'role'
+        }
+    });
 
     if (!currentUser) {
+        console.log('User not found in database');
         return res.status(401).json({ message: 'User not found' });
     }
 
+    console.log('User authenticated:', currentUser);
     req.user = currentUser;
     next();
 });
+
 
 exports.forgotPassword = catchAsync(async (req, res, next) => {
     const user = await User.findOne({ email: req.body.email });
@@ -246,15 +282,39 @@ exports.isAdmin = catchAsync(async (req, res, next) => {
         throw new AppError("Organization not found", 404);
     }
 
-    if (!organization.adminIds || !Array.isArray(organization.adminIds)) {
-        throw new AppError("Organization adminIds not properly set up", 500);
+    if (!organization.roles || !Array.isArray(organization.roles)) {
+        throw new AppError("Organization roles not properly set up", 500);
     }
 
-    const isAdmin = organization.adminIds.includes(userId);
-    if (!isAdmin) {
+    const roleObj = organization.roles.find(role => role.userId.toString() === userId.toString());
+    if (!roleObj || roleObj.role !== 'admin') {
         throw new AppError("Access denied. Admins only.", 403);
     }
-
+    
     next();
 });
 
+exports.updateEmailDomains = catchAsync(async (req, res, next) => {
+    const { validEmailDomains } = req.body;
+    const { id } = req.params;
+
+    if (!Array.isArray(validEmailDomains) || validEmailDomains.length === 0) {
+        return next(new AppError('At least one valid email domain is required', 400));
+    }
+
+    const organization = await Organization.findById(id);
+    if (!organization) return next(new AppError('Organization not found', 404));
+
+    const userRole = organization.roles.find(role => role.userId.toString() === req.user.id.toString());
+    if (!userRole || userRole.role !== 'admin') {
+        return next(new AppError('Only admins can update email domains', 403));
+    }
+
+    organization.validEmailDomains = validEmailDomains;
+    await organization.save();
+
+    res.status(200).json({
+        status: 'success',
+        data: { organization }
+    });
+});

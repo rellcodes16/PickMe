@@ -12,6 +12,8 @@ router.get("/:organizationId", votingSessController.getVotingSessions);
 
 router.get("/session/:sessionId", votingSessController.getVotingSession);
 
+router.get('/active/:organizationId', protect, votingSessController.getActiveVotingSessions);
+
 router.patch("/:organizationId/:sessionId", isAdmin, votingSessController.updateVotingSession);
 
 router.delete("/:organizationId/:sessionId", isAdmin, votingSessController.deleteVotingSession);

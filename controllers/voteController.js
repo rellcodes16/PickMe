@@ -14,13 +14,17 @@ exports.castVote = catchAsync(async (req, res, next) => {
     }
 
     const candidate = await Candidate.findById(candidateId);
-    if (!candidate) {
-        return next(new AppError("Candidate not found.", 404));
+    if (!candidate || String(candidate.votingSessionId) !== String(votingSessionId)) {
+        return next(new AppError("Candidate not found or does not belong to this session.", 404));
     }
+    
+    const existingVote = await Vote.findOne({ 
+        user: userId, 
+        votingSession: votingSessionId,
+    }).populate("candidate");
 
-    const existingVote = await Vote.findOne({ user: userId, votingSession: votingSessionId });
-    if (existingVote) {
-        return next(new AppError("You have already voted in this session.", 400));
+    if (existingVote && existingVote.candidate.position === candidate.position) {
+        return next(new AppError(`You have already voted for ${candidate.position}.`, 400));
     }
 
     await Vote.create({ user: userId, votingSession: votingSessionId, candidate: candidateId });
@@ -33,7 +37,7 @@ exports.castVote = catchAsync(async (req, res, next) => {
         await votingSession.save();
     }
 
-    res.status(200).json({ message: "Vote cast successfully!" });
+    res.status(200).json({ message: `Vote cast successfully for ${candidate.position}!` });
 });
 
 exports.getVotes = catchAsync(async (req, res, next) => {

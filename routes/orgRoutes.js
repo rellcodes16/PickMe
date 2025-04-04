@@ -1,6 +1,6 @@
 const express = require('express')
 const orgController = require('../controllers/orgController')
-const { protect } = require('../controllers/authController')
+const { protect, isAdmin } = require('../controllers/authController')
 const uploadMiddleware = require('../utils/multer')
 
 const router = express.Router()
@@ -11,6 +11,8 @@ router.post('/create', uploadMiddleware, orgController.createOrganization);
 router.get('/my-organizations', orgController.getUserOrganizations);
 router.patch('/assign-admin', orgController.assignAdmin)
 router.patch('/update-org/:organizationId', uploadMiddleware, orgController.updateOrganization);
-router.delete('/remove-user', orgController.removeUser)
+router.delete('/remove-member', orgController.removeMember)
+router.delete('/remove-admin', orgController.removeAdmin)
+router.delete('/leave-org', orgController.leaveOrganization)
 
 module.exports = router;

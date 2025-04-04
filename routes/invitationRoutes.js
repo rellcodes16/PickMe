@@ -6,6 +6,7 @@ const router = express.Router()
 
 router.use(protect)
 
-router.post('/invite-users', invitationController.inviteUser);
+router.post("/invite-admin", protect, invitationController.inviteAdmin);
+router.post("/invite-voter", protect, invitationController.inviteVoter);
 
 module.exports = router;

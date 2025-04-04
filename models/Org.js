@@ -3,7 +3,18 @@ const mongoose = require('mongoose')
 const OrganizationSchema = new mongoose.Schema({
     name: { type: String, required: true, unique: true},
     profilePicture: { type: String },
-    adminIds: [{type: mongoose.Schema.Types.ObjectId, ref:'User'}],
+    roles: [{
+        userId: { 
+            type: mongoose.Schema.Types.ObjectId, 
+            ref: 'User' 
+        },
+        role: {
+            type: String,
+            enum: ['admin', 'voter'],
+            default: 'voter'
+        }
+    }],
+    validEmailDomains: [{type: String }]
 
 })
 
