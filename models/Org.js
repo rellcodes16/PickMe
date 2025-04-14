@@ -2,6 +2,7 @@ const mongoose = require('mongoose')
 
 const OrganizationSchema = new mongoose.Schema({
     name: { type: String, required: true, unique: true},
+    description: { type: String },
     profilePicture: { type: String },
     roles: [{
         userId: { 
@@ -14,8 +15,15 @@ const OrganizationSchema = new mongoose.Schema({
             default: 'voter'
         }
     }],
-    validEmailDomains: [{type: String }]
-
+    members: [{
+        userId: { 
+            type: mongoose.Schema.Types.ObjectId, 
+            ref: 'User' 
+        },
+        name: { type: String }, 
+        profilePicture: { type: String },  
+    }],
+    validEmailDomains: [{type: String }],
 })
 
 module.exports = mongoose.model('Organization', OrganizationSchema)

@@ -30,7 +30,13 @@ const createSendToken = async (user, statusCode, res) => {
 
     user.password = undefined;
 
-    await user.populate('organizationIds');
+    await user.populate({
+        path: 'organizationIds',
+        populate: {
+            path: 'roles.userId',
+            select: 'role', 
+        }
+    });
 
     res.status(statusCode).json({
         status: 'success',
@@ -50,11 +56,11 @@ exports.signup = catchAsync(async (req, res, next) => {
     let votingSessionId = null;
 
     let emailFromToken = null;
+
     if (inviteToken) {
         try {
             const decoded = jwt.verify(inviteToken, process.env.JWT_SECRET);
-
-            emailFromToken = decoded.email; 
+            emailFromToken = decoded.email;
 
             const organization = await Organization.findById(decoded.organizationId);
 
@@ -67,7 +73,7 @@ exports.signup = catchAsync(async (req, res, next) => {
                 return next(new AppError('Your email domain is not allowed for this organization', 400));
             }
 
-            role = decoded.role || 'voter'; 
+            role = decoded.role || 'voter';
             votingSessionId = decoded.votingSessionId || null;
             organizations.push(organization._id);
 
@@ -85,17 +91,44 @@ exports.signup = catchAsync(async (req, res, next) => {
     const finalEmail = emailFromToken || email;
 
     const existingUser = await User.findOne({ email: finalEmail });
-
     if (existingUser && !inviteToken) {
         return next(new AppError('User with this email already exists', 400));
     }
 
+    if (organizationName) {
+        const newOrganization = await Organization.create({
+            name: organizationName,
+            roles: [], 
+            validEmailDomains: [finalEmail.split('@')[1]],
+        });
+        organizations.push(newOrganization._id); 
+
+        const newUser = await User.create({
+            name,
+            email: finalEmail,
+            password,
+            passwordConfirm,
+            profilePicture,
+            organizationIds: organizations,
+            role: 'admin', 
+        });
+
+        const org = await Organization.findById(newOrganization._id);
+        if (org) {
+            org.roles.push({ userId: newUser._id, role: 'admin' });
+            await org.save();
+        }
+
+        createSendToken(newUser, 201, res);
+        return; 
+    }
+
     const newUser = await User.create({
         name,
-        email: finalEmail, 
+        email: finalEmail,
         password,
         passwordConfirm,
-        profilePicture, 
+        profilePicture,
         organizationIds: organizations,
         role,
     });
@@ -118,7 +151,6 @@ exports.signup = catchAsync(async (req, res, next) => {
 
     createSendToken(newUser, 201, res);
 });
-
 
 
 exports.login = catchAsync(async (req, res, next) => {
@@ -275,11 +307,16 @@ exports.updatePassword = catchAsync(async (req, res, next) => {
 
 exports.isAdmin = catchAsync(async (req, res, next) => {
     const userId = req.user.id;
-    const { organizationId } = req.params;
+    const { sessionId } = req.params;
 
-    const organization = await Organization.findById(organizationId);
+    const session = await VotingSession.findById(sessionId);
+    if (!session) {
+        return next(new AppError("Voting session not found", 404));
+    }
+
+    const organization = await Organization.findById(session.organization);
     if (!organization) {
-        throw new AppError("Organization not found", 404);
+        return next(new AppError("Organization not found", 404));
     }
 
     if (!organization.roles || !Array.isArray(organization.roles)) {
@@ -288,9 +325,9 @@ exports.isAdmin = catchAsync(async (req, res, next) => {
 
     const roleObj = organization.roles.find(role => role.userId.toString() === userId.toString());
     if (!roleObj || roleObj.role !== 'admin') {
-        throw new AppError("Access denied. Admins only.", 403);
+        return next(new AppError("Access denied. Admins only.", 403));
     }
-    
+
     next();
 });
 

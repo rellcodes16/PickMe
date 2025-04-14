@@ -4,9 +4,9 @@ const catchAsync = require("../utils/catchAsync");
 const AppError = require("../utils/apiError");
 
 exports.createCandidate = catchAsync(async (req, res, next) => {
-    const { name, position, votingSessionId } = req.body;
+    const { userId, position, votingSessionId } = req.body;
 
-    if (!name || !position || !votingSessionId) {
+    if (!userId || !position || !votingSessionId) {
         return next(new AppError("All fields are required.", 400));
     }
 
@@ -15,25 +15,35 @@ exports.createCandidate = catchAsync(async (req, res, next) => {
         return next(new AppError("Voting session not found.", 404));
     }
 
-    const profilePicture = req.file ? req.file.path : '';
+    const existingCandidate = await Candidate.findOne({
+        userId,
+        position,
+        votingSessionId
+    });
 
-    const newCandidate = await Candidate.create({ 
-        name, 
-        position, 
-        votingSessionId, 
-        profilePicture 
+    if (existingCandidate) {
+        return next(new AppError("User is already a candidate for this position.", 400));
+    }
+
+    const newCandidate = await Candidate.create({
+        userId,
+        position,
+        votingSessionId
     });
 
     votingSession.candidates.push(newCandidate._id);
     await votingSession.save();
 
-    res.status(201).json({ message: "Candidate created successfully!", candidate: newCandidate });
+    res.status(201).json({
+        message: "Candidate created successfully!",
+        candidate: newCandidate,
+    });
 });
 
 exports.getCandidates = catchAsync(async (req, res, next) => {
     const { votingSessionId } = req.params;
 
-    const candidates = await Candidate.find({ votingSessionId });
+    const candidates = await Candidate.find({ votingSessionId }).populate("userId", "name profilePicture");
 
     if (!candidates.length) {
         return next(new AppError("No candidates found for this session.", 404));
@@ -41,6 +51,7 @@ exports.getCandidates = catchAsync(async (req, res, next) => {
 
     res.status(200).json({ candidates });
 });
+
 
 exports.updateCandidate = catchAsync(async (req, res, next) => {
     const { candidateId } = req.params;

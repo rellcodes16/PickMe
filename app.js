@@ -17,6 +17,7 @@ const votingSessRouter = require('./routes/votingSessRoutes')
 const notificationRouter = require('./routes/notificationRoutes')
 const candidateRouter = require('./routes/candidateRoutes')
 const voteRouter = require('./routes/voteRoutes')
+const resultRouter = require('./routes/resultRoutes')
 
 const app = express()
 
@@ -74,5 +75,6 @@ app.use('/api/v1/votingsess', votingSessRouter)
 app.use('/api/v1/notification', notificationRouter)
 app.use('/api/v1/candidate', candidateRouter)
 app.use('/api/v1/vote', voteRouter)
+app.use('/api/v1/result', resultRouter)
 
 module.exports = app;

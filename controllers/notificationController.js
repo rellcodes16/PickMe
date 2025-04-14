@@ -11,3 +11,19 @@ exports.getNotifications = catchAsync(async (req, res, next) => {
         data: notifications
     });
 });
+
+exports.markAsRead = catchAsync(async (req, res, next) => {
+    const notification = await Notification.findOneAndUpdate(
+        { _id: req.params.id, user: req.user.id },
+        { isRead: true },
+        { new: true }
+    );
+
+    if (!notification) return next(new AppError("Notification not found", 404));
+
+    res.status(200).json({
+        status: "success",
+        data: notification
+    });
+});
+

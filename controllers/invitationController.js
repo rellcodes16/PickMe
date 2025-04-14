@@ -24,7 +24,8 @@ exports.inviteAdmin = catchAsync(async (req, res, next) => {
 
     const inviteToken = jwt.sign({ 
         email, 
-        organizationId, 
+        organizationId,
+        organizationName: organization.name,
         role: 'admin' 
     }, process.env.JWT_SECRET, { expiresIn: '7d' });
 
@@ -88,6 +89,7 @@ exports.inviteVoter = [
                             const inviteToken = jwt.sign({
                                 email,
                                 organizationId,
+                                organizationName: organization.name,
                                 role: 'voter'
                             }, process.env.JWT_SECRET, { expiresIn: '7d' });
 
@@ -149,6 +151,106 @@ exports.inviteVoter = [
     }),
 ];
 
+exports.acceptInvite = catchAsync(async (req, res, next) => {
+    const { token } = req.body;
+    let decoded;
+  
+    try {
+      decoded = jwt.verify(token, process.env.JWT_SECRET);
+    } catch (err) {
+      return next(new AppError('Invalid or expired token', 400));
+    }
+  
+    const user = await User.findById(req.user.id);
+    if (!user) return next(new AppError('User not found', 404));
+  
+    const inviteIndex = user.pendingInvites.findIndex(invite => invite.token === token);
+    if (inviteIndex === -1) {
+      return next(new AppError('Invite not found or already accepted', 400));
+    }
+  
+    const { organizationId, role, organizationName } = decoded;
+    const organization = await Organization.findById(organizationId);
+    if (!organization) {
+      return next(new AppError('Organization no longer exists', 404));
+    }
+  
+    const userIdStr = String(user._id);
+  
+    const isAlreadyMember = organization.roles.some(r => String(r.userId) === userIdStr);
+    if (!isAlreadyMember) {
+      organization.roles.push({ userId: user._id, role });
+      await organization.save();
+    }
+  
+    const isOrgInUser = user.organizationIds.some(id => String(id) === String(organizationId));
+    if (!isOrgInUser) {
+      user.organizationIds.push(organizationId);
+    }
+  
+    user.pendingInvites.splice(inviteIndex, 1);
+    await user.save();
+  
+    res.status(200).json({
+      status: 'success',
+      message: `You have joined ${organizationName} as ${role}`,
+      organization,
+    });
+  });
+  
+exports.declineInvite = catchAsync(async (req, res, next) => {
+    const { token } = req.body;
+    let decoded;
 
+    try {
+      decoded = jwt.verify(token, process.env.JWT_SECRET);
+    } catch (err) {
+      return next(new AppError('Invalid or expired token', 400));
+    }
+  
+    const user = await User.findById(req.user.id);
+    if (!user) return next(new AppError('User not found', 404));
+  
+    const inviteIndex = user.pendingInvites.findIndex(invite => invite.token === token);
+    if (inviteIndex === -1) {
+      return next(new AppError('Invite not found or already handled', 400));
+    }
 
+    user.pendingInvites.splice(inviteIndex, 1);
+    await user.save();
+  
+    res.status(200).json({
+      status: 'success',
+      message: `You have declined the invite to join ${decoded.organizationName || 'this organization'}`,
+    });
+  });
 
+exports.getPendingInvites = catchAsync(async (req, res, next) => {
+    const user = await User.findById(req.user.id);
+  
+    const invites = await Promise.all(
+      user.pendingInvites.map(async (inviteObj) => {
+        try {
+          const decoded = jwt.verify(inviteObj.token, process.env.JWT_SECRET);
+  
+          return {
+            token: inviteObj.token,
+            organizationId: decoded.organizationId,
+            organizationName: decoded.organizationName,
+            role: decoded.role,
+          };
+        } catch (err) {
+          return null;
+        }
+      })
+    );
+  
+    const validInvites = invites.filter(Boolean);
+  
+    res.status(200).json({
+      status: 'success',
+      results: validInvites.length,
+      data: validInvites
+    });
+});
+  

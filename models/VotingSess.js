@@ -23,6 +23,10 @@ const VotingSessionSchema = new mongoose.Schema({
         type: Date, 
         required: true 
     },
+    votes: [{ 
+        type: mongoose.Schema.Types.ObjectId, 
+        ref: "Vote"  
+    }], 
     candidates: [{ 
         type: mongoose.Schema.Types.ObjectId, 
         ref: "Candidate" 

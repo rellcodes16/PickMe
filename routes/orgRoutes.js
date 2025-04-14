@@ -14,5 +14,6 @@ router.patch('/update-org/:organizationId', uploadMiddleware, orgController.upda
 router.delete('/remove-member', orgController.removeMember)
 router.delete('/remove-admin', orgController.removeAdmin)
 router.delete('/leave-org', orgController.leaveOrganization)
+router.delete('/delete-org', orgController.deleteOrganization)
 
 module.exports = router;

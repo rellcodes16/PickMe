@@ -5,6 +5,9 @@ const VotingSession = require("../models/VotingSess");
 const User = require("../models/User");
 const Notification = require("../models/Notification");
 const catchAsync = require("../utils/catchAsync");
+const sendEmail = require("../utils/sendEmail");
+const formatVotingResult = require("./formatVotingResult")
+const Result = require("../models/Result")
 
 let isRunning = false;
 
@@ -46,7 +49,7 @@ const processVotingSessions = catchAsync(async () => {
             console.log(`🔍 Looking for users in organization: ${organization}`);
 
             if (organization) {
-                const usersInOrganization = await User.find({ organizationIds: session.organization }).select("_id");
+                const usersInOrganization = await User.find({ organizationIds: session.organization }).select("_id email");
                 const userIds = usersInOrganization.map(user => user._id); 
 
                 if (userIds.length === 0) {
@@ -61,7 +64,7 @@ const processVotingSessions = catchAsync(async () => {
                         isRead: false
                     }));
 
-                    console.log(`👥 Found ${userIds.length} users in organization`)
+                    console.log(`👥 Found ${userIds.length} users in organization`);
 
                     await Notification.insertMany(notifications);
                     const insertedNotifications = await Notification.find({ user: { $in: userIds.map(u => u._id) } });
@@ -69,11 +72,20 @@ const processVotingSessions = catchAsync(async () => {
 
                     console.log("📩 Notifications successfully inserted into DB.");
 
+                    await Promise.all(usersInOrganization.map(user => {
+                        return sendEmail({
+                            email: user.email,
+                            subject: `Voting has started!`,
+                            html: `<p>The voting session <strong>${session.title}</strong> has started. You can now cast your votes!</p>`
+                        });
+                    }));
+
+                    console.log("📩 Email notifications sent to users.");
                 }
             }
         }
 
-        console.log("📢 In-app notifications sent to all members.");
+        console.log("📢 In-app notifications and email notifications sent to all members.");
     }
 
     const expiredSessions = await VotingSession.find({ 
@@ -97,24 +109,54 @@ const processVotingSessions = catchAsync(async () => {
         for (const session of expiredSessions) {
             const { organization } = session;
 
+            const { finalFormattedResult, positionWinners } = await formatVotingResult(session._id);
+
+            await Result.create({
+                votingSession: session._id,
+                results: finalFormattedResult,
+                winners: positionWinners
+            });
+
             if (organization) {
-                const usersInOrganization = await User.find({ organizationIds: session.organization }).select("_id"); 
-                const userIds = usersInOrganization.map(user => user._id); 
+                const usersInOrganization = await User.find({ organizationIds: organization }).select("_id email");
+                const userIds = usersInOrganization.map(user => user._id);
 
                 if (userIds.length > 0) {
                     const notifications = userIds.map(userId => ({
                         user: userId,
                         message: `The voting session "${session.title}" has ended. You can now check the results.`,
                         type: "voting_result",
-                        isRead: false
+                        isRead: false,
+                        metadata: {
+                            sessionId: session._id,
+                            results: finalFormattedResult,
+                            winners: positionWinners
+                        }
                     }));
 
                     await Notification.insertMany(notifications);
                 }
+                await Promise.all(usersInOrganization.map(user => {
+                    return sendEmail({
+                        email: user.email,
+                        subject: `Voting Results - ${session.title}`,
+                        html: `
+                            <p>The voting session <strong>${session.title}</strong> has ended.</p>
+                            <p><strong>Winners:</strong></p>
+                            <ul>
+                                ${Object.entries(positionWinners).map(([pos, winner]) => `<li><strong>${pos}</strong>: ${winner.name}</li>`).join("")}
+                            </ul>
+                        `
+                    });
+                }));
+
+                console.log("📩 Email notifications sent to users for voting results.");
             }
+
+            console.log(`✅ Results sent for session "${session.title}"`);
         }
 
-        console.log("📢 In-app notifications sent to all members.");
+        console.log("📢 In-app notifications and email notifications sent to all members.");
     }
 
     isRunning = false; 

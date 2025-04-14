@@ -6,7 +6,7 @@ const router = express.Router()
 
 router.use(protect)
 
-router.post("/:organizationId", isAdmin, votingSessController.createVotingSession);
+router.post("/create-votingsess/:organizationId", isAdmin, votingSessController.createVotingSession);
 
 router.get("/:organizationId", votingSessController.getVotingSessions);
 
@@ -14,13 +14,18 @@ router.get("/session/:sessionId", votingSessController.getVotingSession);
 
 router.get('/active/:organizationId', protect, votingSessController.getActiveVotingSessions);
 
-router.patch("/:organizationId/:sessionId", isAdmin, votingSessController.updateVotingSession);
+router.get('/analytics/:sessionId', protect, votingSessController.getVotingSessionAnalytics);
 
-router.delete("/:organizationId/:sessionId", isAdmin, votingSessController.deleteVotingSession);
+router.patch("/update-votingsess/:organizationId/:sessionId", isAdmin, votingSessController.updateVotingSession);
 
-router.patch("/:organizationId/sessions/:sessionId/start", isAdmin, votingSessController.startVotingSession);
+router.delete("/delete-votingsess/:organizationId/:sessionId", isAdmin, votingSessController.deleteVotingSession);
+
+router.patch("/sessions/:organizationId/:sessionId/start",isAdmin, votingSessController.startVotingSession);
   
-router.patch("/:organizationId/sessions/:sessionId/end", isAdmin, votingSessController.endVotingSession);
+router.patch("/sessions/:organizationId/:sessionId/end",isAdmin, votingSessController.endVotingSession);
+
+router.post("/:organizationId/:sessionId/:id/remind-voters", protect, isAdmin , votingSessController.remindVoters);
+
   
 
 module.exports = router;

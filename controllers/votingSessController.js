@@ -161,20 +161,28 @@ exports.getVotingSessionAnalytics = catchAsync(async (req, res, next) => {
 
     const session = await VotingSession.findById(sessionId)
         .populate({
-            path: "votes.candidate",
-            populate: { path: "position" }
-        });
+            path: "votes",
+            populate: { 
+                path: "candidate",
+                populate: { path: "position" } 
+            }
+        })
+        .populate("organization");
 
     if (!session) return next(new AppError("Voting session not found", 404));
 
-    if (session.status !== "ongoing") {
+    if (req.user.organizationId && req.user.organizationId.toString() !== session.organization._id.toString()) {
+        return next(new AppError("You are not authorized to view this session", 403));
+    }
+
+    if (session.status !== "active") {
         return next(new AppError("Voting session is not active", 400));
     }
 
     const now = new Date();
-    const sessionStart = new Date(session.startTime);
-    const sessionEnd = session.endTime ? new Date(session.endTime) : now; 
-    const durationInHours = (sessionEnd - sessionStart) / 1000 / 60 / 60; 
+    const sessionStart = new Date(session.startDate);
+    const sessionEnd = session.endDate ? new Date(session.endDate) : now;
+    const durationInHours = (sessionEnd - sessionStart) / 1000 / 60 / 60;
 
     let peakData = {};
     let peakType = durationInHours <= 24 ? "hourly" : "daily";
@@ -210,7 +218,6 @@ exports.getVotingSessionAnalytics = catchAsync(async (req, res, next) => {
         positionResults[positionName][candidateId].votes += 1;
     });
 
-    // **Determine Winner for Each Position**
     let positionWinners = {};
     let formattedResults = {};
 
@@ -236,7 +243,6 @@ exports.getVotingSessionAnalytics = catchAsync(async (req, res, next) => {
             }
         });
 
-        // Convert to percentage for frontend
         formattedResults[position] = formattedResults[position].map(candidate => ({
             ...candidate,
             percentage: ((candidate.votes / totalVotes) * 100).toFixed(2)
@@ -245,22 +251,22 @@ exports.getVotingSessionAnalytics = catchAsync(async (req, res, next) => {
         positionWinners[position] = winner;
     });
 
-    // **Prepare Analytics Response**
     res.status(200).json({
         status: "success",
         data: {
             votingSessionId: session._id,
-            votingSessionName: session.name,
+            votingSessionName: session.title,  
+            organizationId: session.organization._id,
+            organizationName: session.organization.name,
             durationInHours,
             peakVotingTime,
             peakType,
-            peakData,  // Object for chart
-            positionResults: formattedResults, // Results categorized by position
-            positionWinners // Winners per position
+            peakData,
+            positionResults: formattedResults,
+            positionWinners
         }
     });
 });
-
 
 
 exports.startVotingSession = catchAsync(async (req, res, next) => {
@@ -342,6 +348,56 @@ exports.endVotingSession = catchAsync(async (req, res, next) => {
     res.status(200).json({
         status: "success",
         data: votingSession
+    });
+});
+
+exports.remindVoters = catchAsync(async (req, res, next) => {
+    const sessionId = req.params.id;
+
+    const session = await VotingSession.findById(sessionId);
+    if (!session) return next(new AppError("Voting session not found", 404));
+
+    if (session.status !== "active") {
+        return next(new AppError("Voting session is not currently active", 400));
+    }
+
+    const allUsers = await User.find({ organizationIds: session.organization }).select("_id email name");
+
+    const voters = await Vote.find({ votingSession: sessionId }).distinct("voter");
+    const votersSet = new Set(voters.map(id => id.toString()));
+
+    const nonVoters = allUsers.filter(user => !votersSet.has(user._id.toString()));
+
+    if (nonVoters.length === 0) {
+        return res.status(200).json({
+            status: "success",
+            message: "All users have voted"
+        });
+    }
+
+    const notifications = nonVoters.map(user => ({
+        user: user._id,
+        message: `Reminder: You haven't voted in "${session.title}". Please cast your vote before it ends.`,
+        type: "general",
+        isRead: false
+    }));
+    await Notification.insertMany(notifications);
+
+    await Promise.all(nonVoters.map(user => {
+        return sendEmail({
+            email: user.email,
+            subject: `Reminder to Vote - ${session.title}`,
+            html: `
+                <p>Hi ${user.name || ""},</p>
+                <p>This is a reminder that you haven’t yet voted in the ongoing session <strong>${session.title}</strong>.</p>
+                <p>Make sure to cast your vote before it ends!</p>
+            `
+        });
+    }));
+
+    res.status(200).json({
+        status: "success",
+        message: `Reminders sent to ${nonVoters.length} users`
     });
 });
 

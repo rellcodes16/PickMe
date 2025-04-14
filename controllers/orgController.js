@@ -8,7 +8,7 @@ const sendResponse = (res, statusCode, data) => {
 };
 
 exports.createOrganization = catchAsync(async (req, res, next) => {
-    const { name, validEmailDomains } = req.body;
+    const { name, validEmailDomains, description } = req.body;
     if (!name) return next(new AppError('Organization name is required', 400));
 
     const existingOrg = await Organization.findOne({ name });
@@ -20,10 +20,21 @@ exports.createOrganization = catchAsync(async (req, res, next) => {
 
     const profilePicture = req.file ? req.file.path : ''; 
 
-    const newOrganization = await Organization.create({ name, profilePicture, validEmailDomains, voterIds: [] });
-
     const user = await User.findById(req.user.id);
     if (!user) return next(new AppError('User not found', 404));
+
+    const newOrganization = await Organization.create({ 
+        name, 
+        description, 
+        profilePicture, 
+        validEmailDomains, 
+        voterIds: [], 
+        // members: [{
+        //     userId: user._id,
+        //     name: user.name,
+        //     profilePicture: user.profilePicture,  
+        // }]
+    });
 
     newOrganization.roles.push({ userId: user._id, role: 'admin' });
     user.organizationIds.push(newOrganization._id);
@@ -210,3 +221,30 @@ exports.leaveOrganization = catchAsync(async (req, res, next) => {
     res.status(200).json({ message: 'You have successfully left the organization' });
 });
 
+exports.deleteOrganization = catchAsync(async (req, res, next) => {
+    const { organizationId } = req.params;
+
+    const organization = await Organization.findById(organizationId);
+    if (!organization) return next(new AppError('Organization not found', 404));
+
+    if (organization.adminIds[0].toString() !== req.user.id) {
+        return next(new AppError('Only the organization creator can delete the organization', 403));
+    }
+
+    const usersInOrganization = await User.find({ organizationIds: organizationId });
+    for (const user of usersInOrganization) {
+        user.organizationIds = user.organizationIds.filter(id => id.toString() !== organizationId);
+
+        user.roles = user.roles.filter(role => role.organizationId.toString() !== organizationId);
+        await user.save();
+    }
+
+    await VotingSession.deleteMany({ organizationId });
+
+    await organization.remove();
+
+    res.status(200).json({
+        status: 'success',
+        message: 'Organization deleted successfully',
+    });
+});
