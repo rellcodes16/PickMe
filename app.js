@@ -68,6 +68,11 @@ app.get('/', (req, res) => {
     res.status(200).send('Hello World!!')
 })
 
+app.get('/api/v1/auth/test', (req, res) => {
+    res.status(200).send('Test route is working');
+});
+
+
 app.use('/api/v1/auth', authRouter)
 app.use('/api/v1/org', orgRouter)
 app.use('/api/v1/invitation', invitationRouter)
