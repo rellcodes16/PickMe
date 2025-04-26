@@ -8,44 +8,41 @@ const sendResponse = (res, statusCode, data) => {
 };
 
 exports.createOrganization = catchAsync(async (req, res, next) => {
-    const { name, validEmailDomains, description } = req.body;
+    const { name, validEmailDomains = [], description } = req.body;
+  
     if (!name) return next(new AppError('Organization name is required', 400));
-
+  
     const existingOrg = await Organization.findOne({ name });
     if (existingOrg) return next(new AppError('Organization name is already taken', 400));
-
-    if (!Array.isArray(validEmailDomains) || validEmailDomains.length === 0) {
-        return next(new AppError('At least one valid email domain is required', 400));
-    }
-
-    const profilePicture = req.file ? req.file.path : ''; 
-
+  
+    const profilePicture = req.file ? req.file.path : '';
+  
     const user = await User.findById(req.user.id);
     if (!user) return next(new AppError('User not found', 404));
+  
+    const userEmailDomain = user.email.split('@')[1];
+    if (!userEmailDomain) return next(new AppError('Invalid user email format', 400));
 
+    const allValidDomains = Array.from(new Set([userEmailDomain, ...validEmailDomains]));
+  
     const newOrganization = await Organization.create({ 
-        name, 
-        description, 
-        profilePicture, 
-        validEmailDomains, 
-        voterIds: [], 
-        // members: [{
-        //     userId: user._id,
-        //     name: user.name,
-        //     profilePicture: user.profilePicture,  
-        // }]
+      name, 
+      description, 
+      profilePicture, 
+      validEmailDomains: allValidDomains,
+      voterIds: [],
     });
-
+  
     newOrganization.roles.push({ userId: user._id, role: 'admin' });
     user.organizationIds.push(newOrganization._id);
     user.role = 'admin';
-
+  
     await newOrganization.save();
     await user.save();
-
-    sendResponse(res, 201, { organization: newOrganization, user, validEmailDomains });
+  
+    sendResponse(res, 201, { organization: newOrganization, user, validEmailDomains: allValidDomains });
 });
-
+  
 exports.updateOrganization = catchAsync(async (req, res, next) => {
     const { organizationId } = req.params; 
     const { name } = req.body;
