@@ -188,35 +188,32 @@ exports.leaveOrganization = catchAsync(async (req, res, next) => {
     console.log('🔹 User organizations:', req.user.organizationIds);
     console.log('🔹 Organization Admins:', organization.adminIds);
 
-
-    console.log(req.user)
-
     const isMember = req.user.organizationIds.some(org => org._id.toString() === organization._id.toString());
-    
     if (!isMember) {
         console.log('❌ User is not a member of this organization');
         return next(new AppError('You are not a member of this organization', 400));
     }
 
-    if (String(organization.adminIds[0]) === String(req.user.id)) {
+    const isAdmin = organization.adminIds.some(adminId => adminId.toString() === req.user.id.toString());
+    if (isAdmin) {
         console.log('❌ User is the creator and cannot leave');
         return next(new AppError('The creator cannot leave the organization', 403));
     }
 
     req.user.organizationIds = req.user.organizationIds.filter(
-        (org) => org._id.toString() !== organization._id.toString()
+        (org) => org.toString() !== organization._id.toString()
     );
+    await req.user.save();
 
     organization.adminIds = organization.adminIds.filter(
-        (id) => id.toString() !== req.user.id
+        (id) => id.toString() !== req.user.id.toString()
     );
-
-    await req.user.save();
     await organization.save();
 
     console.log('✅ User successfully left organization');
     res.status(200).json({ message: 'You have successfully left the organization' });
 });
+
 
 exports.deleteOrganization = catchAsync(async (req, res, next) => {
     const { organizationId } = req.params;

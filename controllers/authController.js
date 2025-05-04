@@ -218,7 +218,7 @@ exports.protect = catchAsync(async (req, res, next) => {
 
     if (!token) {
         console.log('No token provided');
-        return res.status(401).json({ message: 'You are not logged in' });
+        return res.status(401).json({ message: 'You are not logged inn!' });
     }
 
     let decoded;
