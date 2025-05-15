@@ -8,6 +8,8 @@ router.use(protect)
 
 router.post("/create-votingsess/:organizationId", isAdmin, votingSessController.createVotingSession);
 
+router.get("/all", votingSessController.getAllUserVotingSessions);
+
 router.get("/:organizationId", votingSessController.getVotingSessions);
 
 router.get("/session/:sessionId", votingSessController.getVotingSession);

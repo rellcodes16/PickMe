@@ -66,6 +66,30 @@ exports.getVotingSessions = catchAsync(async (req, res, next) => {
     });
 });
 
+exports.getAllUserVotingSessions = catchAsync(async (req, res, next) => {
+    const userId = req.user._id;
+
+    const user = await User.findById(userId).select('organizationIds');
+
+    if (!user || !user.organizationIds || user.organizationIds.length === 0) {
+        return res.status(200).json({
+            status: "success",
+            results: 0,
+            data: [],
+        });
+    }
+
+    const votingSessions = await VotingSession.find({
+        organization: { $in: user.organizationIds },
+    });
+
+    res.status(200).json({
+        status: "success",
+        results: votingSessions.length,
+        data: votingSessions,
+    });
+});  
+
 exports.getVotingSession = catchAsync(async (req, res, next) => {
     const { sessionId } = req.params;
     const session = await VotingSession.findById(sessionId);
