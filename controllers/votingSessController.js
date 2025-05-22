@@ -57,7 +57,8 @@ exports.getVotingSessions = catchAsync(async (req, res, next) => {
         return next(new AppError("Organization not found", 404));
     }
 
-    const votingSessions = await VotingSession.find({ organization: organizationId });
+    const votingSessions = await VotingSession.find({ organization: organizationId })
+        .populate('organization', 'name'); 
 
     res.status(200).json({
         status: "success",
@@ -65,6 +66,7 @@ exports.getVotingSessions = catchAsync(async (req, res, next) => {
         data: votingSessions
     });
 });
+
 
 exports.getAllUserVotingSessions = catchAsync(async (req, res, next) => {
     const userId = req.user._id;
@@ -81,14 +83,15 @@ exports.getAllUserVotingSessions = catchAsync(async (req, res, next) => {
 
     const votingSessions = await VotingSession.find({
         organization: { $in: user.organizationIds },
-    });
+    }).populate('organization');
 
     res.status(200).json({
         status: "success",
         results: votingSessions.length,
         data: votingSessions,
     });
-});  
+});
+ 
 
 exports.getVotingSession = catchAsync(async (req, res, next) => {
     const { sessionId } = req.params;

@@ -6,7 +6,7 @@ const router = express.Router()
 
 router.use(protect)
 
-router.post("/create-votingsess/:organizationId", isAdmin, votingSessController.createVotingSession);
+router.post("/create-votingsess/:organizationId", votingSessController.createVotingSession);
 
 router.get("/all", votingSessController.getAllUserVotingSessions);
 
