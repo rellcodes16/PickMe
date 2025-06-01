@@ -302,6 +302,22 @@ exports.updatePassword = catchAsync(async (req, res, next) => {
     createSendToken(user, 200, res);
 });
 
+
+exports.updateCurrentPassword = catchAsync(async (req, res, next) => {
+  const user = await User.findById(req.user.id).select('+password');
+
+  const isCurrentPasswordCorrect = await bcrypt.compare(req.body.passwordCurrent, user.password);
+  if (!isCurrentPasswordCorrect) {
+    return res.status(401).json({ message: 'Current password is incorrect' });
+  }
+
+  user.password = req.body.password; 
+  user.password = await bcrypt.hash(req.body.password, 10);
+  await user.save();
+
+  createSendToken(user, 200, res);
+});
+
 exports.isAdmin = catchAsync(async (req, res, next) => {
     const userId = req.user.id;
     const { sessionId } = req.params;
