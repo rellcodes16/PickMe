@@ -314,11 +314,12 @@ exports.updateCurrentPassword = catchAsync(async (req, res, next) => {
     return res.status(401).json({ message: 'Current password is incorrect' });
   }
 
-  user.password = await bcrypt.hash(req.body.password, 10);
-  await user.save();
+  user.password = req.body.password; 
+  await user.save(); 
 
   createSendToken(user, 200, res);
 });
+
 
 
 exports.isAdmin = catchAsync(async (req, res, next) => {
