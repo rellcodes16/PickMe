@@ -314,7 +314,8 @@ exports.updateCurrentPassword = catchAsync(async (req, res, next) => {
     return res.status(401).json({ message: 'Current password is incorrect' });
   }
 
-  user.password = req.body.password; 
+  user.password = req.body.password;
+  user.passwordConfirm = req.body.password;
   await user.save(); 
 
   createSendToken(user, 200, res);
