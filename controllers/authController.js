@@ -280,11 +280,11 @@ exports.resetPassword = catchAsync(async (req, res, next) => {
         return res.status(400).json({ message: 'Invalid or expired token' });
     }
 
-    user.password = await bcrypt.hash(req.body.password, 10);
+    user.password = req.body.password; 
     user.passwordResetToken = undefined;
     user.passwordResetExpires = undefined;
 
-    await user.save();
+    await user.save(); 
 
     createSendToken(user, 200, res);
 });
@@ -296,27 +296,30 @@ exports.updatePassword = catchAsync(async (req, res, next) => {
         return res.status(401).json({ message: 'Current password is incorrect' });
     }
 
-    user.password = await bcrypt.hash(req.body.password, 10);
+    user.password = req.body.password;
     await user.save();
 
     createSendToken(user, 200, res);
 });
 
-
 exports.updateCurrentPassword = catchAsync(async (req, res, next) => {
   const user = await User.findById(req.user.id).select('+password');
 
-  const isCurrentPasswordCorrect = await bcrypt.compare(req.body.passwordCurrent, user.password);
+  const isCurrentPasswordCorrect = await bcrypt.compare(
+    req.body.passwordCurrent,
+    user.password
+  );
+
   if (!isCurrentPasswordCorrect) {
     return res.status(401).json({ message: 'Current password is incorrect' });
   }
 
-  user.password = req.body.password; 
   user.password = await bcrypt.hash(req.body.password, 10);
   await user.save();
 
   createSendToken(user, 200, res);
 });
+
 
 exports.isAdmin = catchAsync(async (req, res, next) => {
     const userId = req.user.id;
