@@ -9,6 +9,8 @@ const path = require('path')
 const cors = require('cors')
 const cookieParser = require('cookie-parser')
 const favicon = require('serve-favicon')
+const swaggerUi = require("swagger-ui-express");
+const swaggerSpec = require("./docs/swaggerConfig");
 
 const authRouter = require('./routes/authRoutes')
 const orgRouter = require('./routes/orgRoutes')
@@ -63,6 +65,10 @@ app.use((req, res, next) => {
 
     next()
 })
+
+// Swagger docs route
+app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+
 
 app.get('/', (req, res) => {
     res.status(200).send('Hello World!!')
