@@ -5,9 +5,9 @@ const swaggerOptions = {
   definition: {
     openapi: "3.0.0",
     info: {
-      title: "Voting App API",
+      title: "PickMe API",
       version: "1.0.0",
-      description: "API documentation for the voting app",
+      description: "API documentation for the PickMe",
     },
     servers: [{ url: "http://localhost:3000/api/v1" }],
     components: {
