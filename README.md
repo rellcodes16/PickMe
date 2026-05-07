@@ -19,6 +19,6 @@ It offers real-time vote tracking, secure voter access, and an admin dashboard f
 
 **Tech Stack**
   Backend: Node.js, Express.js
-  Database: MongoDB (Mongoose ORM)
+  Database: Prisma + Supabase
   Authentication: JWT
   Real-Time Updates: Socket.io
