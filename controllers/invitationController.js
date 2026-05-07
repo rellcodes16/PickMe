@@ -1,43 +1,63 @@
 const csv = require('csv-parser');
 const multer = require('multer');
 const fs = require('fs');
-const catchAsync = require('../utils/catchAsync')
-const AppError = require('../utils/apiError')
-const sendEmail = require('../utils/sendEmail')
-const Organization = require('../models/Org')
-const jwt = require('jsonwebtoken')
-const User = require('../models/User')
-const mongoose = require('mongoose')
+const catchAsync = require('../utils/catchAsync');
+const AppError = require('../utils/apiError');
+const sendEmail = require('../utils/sendEmail');
+const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
+const prisma = require('../src/config/prisma');
 
 const upload = multer({ dest: 'uploads/' });
+
+const hashToken = (token) => {
+    return crypto.createHash('sha256').update(token).digest('hex');
+};
+
+const validateEmailDomain = (email, organization) => {
+    const emailDomain = email.split('@')[1];
+    return organization.validEmailDomains.includes(emailDomain);
+};
 
 exports.inviteAdmin = catchAsync(async (req, res, next) => {
     const { email, organizationId } = req.body;
 
-    const organization = await Organization.findById(organizationId);
-    const creatorId = organization.roles[0].userId;
-
+    const organization = await prisma.organization.findUnique({
+        where: { id: organizationId },
+        include: { members: { orderBy: { createdAt: 'asc' } } }
+    });
     if (!organization) return next(new AppError('Organization not found', 404));
-    if (creatorId.toString() !== req.user.id) {
+
+    const creator = organization.members[0];
+    if (creator.userId !== req.user.id) {
         return next(new AppError('Only the organization creator can invite admins', 403));
     }
 
-    const inviteToken = jwt.sign({ 
-        email, 
+    if (!validateEmailDomain(email, organization)) {
+        return next(new AppError('This email domain is not allowed for this organization', 400));
+    }
+
+    const inviteToken = jwt.sign({
+        email,
         organizationId,
         organizationName: organization.name,
-        role: 'admin' 
+        role: 'admin'
     }, process.env.JWT_SECRET, { expiresIn: '7d' });
 
     const inviteLink = `${req.protocol}://${req.get('host')}/signup?inviteToken=${inviteToken}`;
+    const hashedToken = hashToken(inviteToken);
 
-    let user = await User.findOne({ email });
+    const user = await prisma.user.findUnique({ where: { email } });
+
     if (user) {
-        user.pendingInvites.push({ 
-            organizationId, 
-            token: inviteToken 
+        await prisma.pendingInvite.create({
+            data: {
+                userId: user.id,
+                organizationId,
+                role: 'admin',
+                token: hashedToken
+            }
         });
-        await user.save();
     } else {
         await sendEmail({
             email,
@@ -53,13 +73,57 @@ exports.inviteAdmin = catchAsync(async (req, res, next) => {
     });
 });
 
-
-
 exports.inviteVoter = [
     upload.single('csvFile'),
 
     catchAsync(async (req, res, next) => {
-        const { email, organizationId } = req.body;  
+        const { email, organizationId } = req.body;
+
+        const organization = await prisma.organization.findUnique({
+            where: { id: organizationId },
+            include: { members: true }
+        });
+        if (!organization) return next(new AppError('Organization not found', 404));
+
+        const isAdmin = organization.members.some(
+            m => m.userId === req.user.id && m.role === 'admin'
+        );
+        if (!isAdmin) return next(new AppError('Only admins can invite voters', 403));
+
+        const processEmail = async (emailToProcess) => {
+            if (!validateEmailDomain(emailToProcess, organization)) {
+                console.log(`Skipping ${emailToProcess} — domain not allowed`);
+                return { skipped: true, email: emailToProcess };
+            }
+
+            const user = await prisma.user.findUnique({ where: { email: emailToProcess } });
+
+            if (user) {
+                const isUserInOrg = organization.members.some(m => m.userId === user.id);
+                if (!isUserInOrg) {
+                    await prisma.organizationMember.create({
+                        data: { userId: user.id, organizationId, role: 'voter' }
+                    });
+                }
+            } else {
+                const inviteToken = jwt.sign({
+                    email: emailToProcess,
+                    organizationId,
+                    organizationName: organization.name,
+                    role: 'voter'
+                }, process.env.JWT_SECRET, { expiresIn: '7d' });
+
+                const inviteLink = `${req.protocol}://${req.get('host')}/signup?inviteToken=${inviteToken}`;
+
+                await sendEmail({
+                    email: emailToProcess,
+                    subject: 'Voter Invitation',
+                    message: `You have been invited to vote in ${organization.name}. Click the link to join: ${inviteLink}`,
+                });
+            }
+
+            return { skipped: false, email: emailToProcess };
+        };
 
         if (req.file) {
             const emails = [];
@@ -67,85 +131,31 @@ exports.inviteVoter = [
 
             fs.createReadStream(filePath)
                 .pipe(csv())
-                .on('data', (row) => {
-                    if (row.email) emails.push(row.email);
-                })
+                .on('data', (row) => { if (row.email) emails.push(row.email); })
                 .on('end', async () => {
-                    const organization = await Organization.findById(organizationId);
-                    if (!organization) return next(new AppError('Organization not found', 404));
-
-                    for (const email of emails) {
-                        let user = await User.findOne({ email });
-
-                        if (user) {
-                            const isUserInOrg = organization.roles.some(role => role.userId.toString() === user._id.toString());
-
-                            if (!isUserInOrg) {
-                                organization.roles.push({ userId: user._id, role: 'voter' });
-                            }
-
-                            await organization.save();
-                        } else {
-                            const inviteToken = jwt.sign({
-                                email,
-                                organizationId,
-                                organizationName: organization.name,
-                                role: 'voter'
-                            }, process.env.JWT_SECRET, { expiresIn: '7d' });
-
-                            const inviteLink = `${req.protocol}://${req.get('host')}/signup?inviteToken=${inviteToken}`;
-
-                            await sendEmail({
-                                email,
-                                subject: 'Voter Invitation',
-                                message: `You have been invited to vote in the organization. Click the link to join: ${inviteLink}`,
-                            });
-                        }
-                    }
-
+                    const results = await Promise.all(emails.map(processEmail));
                     fs.unlinkSync(filePath);
+
+                    const sent = results.filter(r => !r.skipped).length;
+                    const skipped = results.filter(r => r.skipped).length;
 
                     res.status(200).json({
                         status: 'success',
-                        message: `${emails.length} voter invitations sent successfully`,
+                        message: `${sent} voter invitation(s) sent. ${skipped} skipped due to invalid domain.`,
                     });
                 })
-                .on('error', (err) => {
+                .on('error', () => {
                     fs.unlinkSync(filePath);
                     return next(new AppError('Error reading CSV file', 500));
                 });
         } else {
-            const organization = await Organization.findById(organizationId);
-            if (!organization) return next(new AppError('Organization not found', 404));
-
-            let user = await User.findOne({ email });
-
-            if (user) {
-                const isUserInOrg = organization.roles.some(role => role.userId.toString() === user._id.toString());
-                if (!isUserInOrg) {
-                    organization.roles.push({ userId: user._id, role: 'voter' });
-                }
-
-                await organization.save();
-            } else {
-                const inviteToken = jwt.sign({
-                    email,
-                    organizationId,
-                    role: 'voter'
-                }, process.env.JWT_SECRET, { expiresIn: '7d' });
-
-                const inviteLink = `${req.protocol}://${req.get('host')}/signup?inviteToken=${inviteToken}`;
-
-                await sendEmail({
-                    email,
-                    subject: 'Voter Invitation',
-                    message: `You have been invited to vote in the organization. Click the link to join: ${inviteLink}`,
-                });
-            }
+            const result = await processEmail(email);
 
             res.status(200).json({
                 status: 'success',
-                message: 'Voter invitation sent successfully',
+                message: result.skipped
+                    ? 'Email domain not allowed for this organization'
+                    : 'Voter invitation sent successfully',
             });
         }
     }),
@@ -153,104 +163,99 @@ exports.inviteVoter = [
 
 exports.acceptInvite = catchAsync(async (req, res, next) => {
     const { token } = req.body;
+
     let decoded;
-  
     try {
-      decoded = jwt.verify(token, process.env.JWT_SECRET);
-    } catch (err) {
-      return next(new AppError('Invalid or expired token', 400));
+        decoded = jwt.verify(token, process.env.JWT_SECRET);
+    } catch {
+        return next(new AppError('Invalid or expired token', 400));
     }
-  
-    const user = await User.findById(req.user.id);
+
+    const user = await prisma.user.findUnique({
+        where: { id: req.user.id },
+        include: { pendingInvites: true }
+    });
     if (!user) return next(new AppError('User not found', 404));
-  
-    const inviteIndex = user.pendingInvites.findIndex(invite => invite.token === token);
-    if (inviteIndex === -1) {
-      return next(new AppError('Invite not found or already accepted', 400));
-    }
-  
+
+    const hashedIncoming = hashToken(token);
+    const invite = user.pendingInvites.find(i => i.token === hashedIncoming);
+    if (!invite) return next(new AppError('Invite not found or already accepted', 400));
+
     const { organizationId, role, organizationName } = decoded;
-    const organization = await Organization.findById(organizationId);
-    if (!organization) {
-      return next(new AppError('Organization no longer exists', 404));
-    }
-  
-    const userIdStr = String(user._id);
-  
-    const isAlreadyMember = organization.roles.some(r => String(r.userId) === userIdStr);
-    if (!isAlreadyMember) {
-      organization.roles.push({ userId: user._id, role });
-      await organization.save();
-    }
-  
-    const isOrgInUser = user.organizationIds.some(id => String(id) === String(organizationId));
-    if (!isOrgInUser) {
-      user.organizationIds.push(organizationId);
-    }
-  
-    user.pendingInvites.splice(inviteIndex, 1);
-    await user.save();
-  
-    res.status(200).json({
-      status: 'success',
-      message: `You have joined ${organizationName} as ${role}`,
-      organization,
+
+    const organization = await prisma.organization.findUnique({
+        where: { id: organizationId }
     });
-  });
-  
-exports.declineInvite = catchAsync(async (req, res, next) => {
-    const { token } = req.body;
-    let decoded;
+    if (!organization) return next(new AppError('Organization no longer exists', 404));
 
-    try {
-      decoded = jwt.verify(token, process.env.JWT_SECRET);
-    } catch (err) {
-      return next(new AppError('Invalid or expired token', 400));
-    }
-  
-    const user = await User.findById(req.user.id);
-    if (!user) return next(new AppError('User not found', 404));
-  
-    const inviteIndex = user.pendingInvites.findIndex(invite => invite.token === token);
-    if (inviteIndex === -1) {
-      return next(new AppError('Invite not found or already handled', 400));
+    if (!validateEmailDomain(user.email, organization)) {
+        await prisma.pendingInvite.delete({ where: { id: invite.id } });
+        return next(new AppError('Your email domain is no longer allowed for this organization', 400));
     }
 
-    user.pendingInvites.splice(inviteIndex, 1);
-    await user.save();
-  
-    res.status(200).json({
-      status: 'success',
-      message: `You have declined the invite to join ${decoded.organizationName || 'this organization'}`,
+    const existingMember = await prisma.organizationMember.findUnique({
+        where: { userId_organizationId: { userId: user.id, organizationId } }
     });
-  });
 
-exports.getPendingInvites = catchAsync(async (req, res, next) => {
-    const user = await User.findById(req.user.id);
-  
-    const invites = await Promise.all(
-      user.pendingInvites.map(async (inviteObj) => {
-        try {
-          const decoded = jwt.verify(inviteObj.token, process.env.JWT_SECRET);
-  
-          return {
-            token: inviteObj.token,
-            organizationId: decoded.organizationId,
-            organizationName: decoded.organizationName,
-            role: decoded.role,
-          };
-        } catch (err) {
-          return null;
-        }
-      })
-    );
-  
-    const validInvites = invites.filter(Boolean);
-  
+    if (!existingMember) {
+        await prisma.organizationMember.create({
+            data: { userId: user.id, organizationId, role }
+        });
+    }
+
+    await prisma.pendingInvite.delete({ where: { id: invite.id } });
+
     res.status(200).json({
-      status: 'success',
-      results: validInvites.length,
-      data: validInvites
+        status: 'success',
+        message: `You have joined ${organizationName} as ${role}`,
+        organization,
     });
 });
-  
+
+exports.declineInvite = catchAsync(async (req, res, next) => {
+    const { token } = req.body;
+
+    let decoded;
+    try {
+        decoded = jwt.verify(token, process.env.JWT_SECRET);
+    } catch {
+        return next(new AppError('Invalid or expired token', 400));
+    }
+
+    const user = await prisma.user.findUnique({
+        where: { id: req.user.id },
+        include: { pendingInvites: true }
+    });
+    if (!user) return next(new AppError('User not found', 404));
+
+    const hashedIncoming = hashToken(token);
+    const invite = user.pendingInvites.find(i => i.token === hashedIncoming);
+    if (!invite) return next(new AppError('Invite not found or already handled', 400));
+
+    await prisma.pendingInvite.delete({ where: { id: invite.id } });
+
+    res.status(200).json({
+        status: 'success',
+        message: `You have declined the invite to join ${decoded.organizationName || 'this organization'}`,
+    });
+});
+
+exports.getPendingInvites = catchAsync(async (req, res, next) => {
+    const pendingInvites = await prisma.pendingInvite.findMany({
+        where: { userId: req.user.id },
+        include: { organization: true }
+    });
+
+    const invites = pendingInvites.map(invite => ({
+        inviteId: invite.id,
+        organizationId: invite.organizationId,
+        organizationName: invite.organization.name,
+        role: invite.role,
+    }));
+
+    res.status(200).json({
+        status: 'success',
+        results: invites.length,
+        data: invites
+    });
+});

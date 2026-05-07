@@ -1,53 +1,39 @@
-const Vote = require("../models/Vote");
-const Candidate = require("../models/Candidate");
+const prisma = require('../src/config/prisma');
 
 const formatVotingResult = async (sessionId) => {
-    const votes = await Vote.find({ votingSession: sessionId });
-    console.log("votess", votes)
-
-    const candidateIds = [...new Set(votes.map(v => v.candidate.toString()))];
-
-
-    const candidates = await Candidate.find({ _id: { $in: candidateIds } }).populate("userId");
-
-
-    console.log("candidatesss", candidates)
-
-    const candidateMap = {};
-    candidates.forEach(c => {
-        candidateMap[c._id.toString()] = {
-            name: c.userId?.name || "Candidate",
-            profilePic: c.profilePicture,
-            
-            position: c.position
-        };
+    const votes = await prisma.vote.findMany({
+        where: { votingSessionId: sessionId },
+        include: {
+            candidate: {
+                include: {
+                    user: { select: { name: true, profilePicture: true } }
+                }
+            }
+        }
     });
+
+    console.log("votes", votes);
+
+    if (!votes.length) return { finalFormattedResult: {}, positionWinners: {} };
 
     let resultByPosition = {};
 
     votes.forEach(vote => {
-        const id = vote.candidate.toString();
-        const info = candidateMap[id];
+        const candidate = vote.candidate;
+        const position = candidate.position;
+        const candidateId = candidate.id;
 
-        if (!info) {
-            console.warn(`No candidate metadata found for ID: ${id}`);
-            return;
-        }
-        const position = info.position;
+        if (!resultByPosition[position]) resultByPosition[position] = {};
 
-        if (!resultByPosition[position]) {
-            resultByPosition[position] = {};
-        }
-
-        if (!resultByPosition[position][id]) {
-            resultByPosition[position][id] = {
-                name: info.name,
-                profilePic: info.profilePic,
+        if (!resultByPosition[position][candidateId]) {
+            resultByPosition[position][candidateId] = {
+                name: candidate.user?.name || "Candidate",
+                profilePic: candidate.user?.profilePicture || null,
                 votes: 0
             };
         }
 
-        resultByPosition[position][id].votes += 1;
+        resultByPosition[position][candidateId].votes += 1;
     });
 
     const finalFormattedResult = {};

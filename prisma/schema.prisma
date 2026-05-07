@@ -1,0 +1,176 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id                   String   @id @default(uuid())
+  name                 String
+  email                String   @unique
+  profilePicture       String?
+  password             String
+  passwordResetToken   String?
+  passwordResetExpires DateTime?
+  passwordChangedAt    DateTime?
+  inviteToken          String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  // Relations
+  memberships          OrganizationMember[]
+  pendingInvites       PendingInvite[]
+  votingSessionsCreated VotingSession[]    @relation("CreatedBy")
+  candidacies          Candidate[]
+  votes                Vote[]
+  notifications        Notification[]
+}
+
+model Organization {
+  id                String   @id @default(uuid())
+  name              String   @unique
+  description       String?
+  profilePicture    String?
+  validEmailDomains String[]
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relations
+  members           OrganizationMember[]
+  votingSessions    VotingSession[]
+  pendingInvites    PendingInvite[]
+  invitations       Invitation[]
+}
+
+model OrganizationMember {
+  id             String       @id @default(uuid())
+  userId         String
+  organizationId String
+  role           Role         @default(voter)
+  createdAt      DateTime     @default(now())
+
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, organizationId])
+}
+
+model PendingInvite {
+  id             String       @id @default(uuid())
+  userId         String
+  organizationId String
+  role           Role
+  token          String
+
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+model VotingSession {
+  id             String        @id @default(uuid())
+  title          String
+  organizationId String
+  createdById    String
+  startDate      DateTime
+  endDate        DateTime
+  status         SessionStatus @default(pending)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  organization   Organization  @relation(fields: [organizationId], references: [id])
+  createdBy      User          @relation("CreatedBy", fields: [createdById], references: [id])
+  candidates     Candidate[]
+  votes          Vote[]
+  voters         VotingSessionVoter[]
+  result         Result?
+}
+
+model VotingSessionVoter {
+  id              String        @id @default(uuid())
+  votingSessionId String
+  userId          String
+
+  votingSession   VotingSession @relation(fields: [votingSessionId], references: [id], onDelete: Cascade)
+
+  @@unique([votingSessionId, userId])
+}
+
+model Candidate {
+  id              String        @id @default(uuid())
+  userId          String
+  position        String
+  votingSessionId String
+  votes           Int           @default(0)
+
+  user            User          @relation(fields: [userId], references: [id])
+  votingSession   VotingSession @relation(fields: [votingSessionId], references: [id], onDelete: Cascade)
+  Vote            Vote[]
+}
+
+model Vote {
+  id              String        @id @default(uuid())
+  userId          String
+  votingSessionId String
+  candidateId     String
+  position        String
+  createdAt       DateTime      @default(now())
+
+  user            User          @relation(fields: [userId], references: [id])
+  votingSession   VotingSession @relation(fields: [votingSessionId], references: [id])
+  candidate       Candidate     @relation(fields: [candidateId], references: [id])
+
+  @@unique([votingSessionId, userId, position]) // one vote per position per session
+}
+
+model Result {
+  id              String        @id @default(uuid())
+  votingSessionId String        @unique
+  results         Json
+  winners         Json
+  generatedAt     DateTime      @default(now())
+
+  votingSession   VotingSession @relation(fields: [votingSessionId], references: [id])
+}
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String
+  message   String
+  type      NotificationType
+  isRead    Boolean          @default(false)
+  metadata  Json             @default("{}")
+  createdAt DateTime         @default(now())
+
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Invitation {
+  id             String       @id @default(uuid())
+  email          String
+  organizationId String
+  token          String
+  expiresAt      DateTime     @default(dbgenerated("NOW() + INTERVAL '7 days'"))
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+enum Role {
+  admin
+  voter
+}
+
+enum SessionStatus {
+  pending
+  active
+  closed
+}
+
+enum NotificationType {
+  voting_result
+  voting_start
+  general
+}
